@@ -1,9 +1,9 @@
 /**
  * Inhaltsmodell für "La Via Italiana".
  *
- * Die Lektionen werden hier als typisierte TypeScript-Module autoriert
- * (Single Source of Truth) und von `prisma/seed.ts` in die Datenbank
- * geschrieben. So bleibt der Inhalt versionierbar und reviewbar.
+ * Die Lektionen werden hier als typisierte TypeScript-Module autoriert — das ist
+ * die Single Source of Truth. Die Typen erzwingen, dass keine Lektion ohne
+ * Racconto, Grammatik, Dialog, Shadowing, Vokabular und Quiz durchrutscht.
  */
 
 export type PhaseCode = "A1-A2" | "B1-B2" | "C1-C2";

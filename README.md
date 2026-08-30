@@ -50,8 +50,7 @@ Grammatikschwerpunkt, darunter *Lektion 7: Monte Sant'Angelo e i Borghi Millenar
 ## Loslegen
 
 ```bash
-npm install          # legt automatisch .env an und generiert den Prisma-Client
-npm run db:setup     # Schema in SQLite anlegen und Lektionen seeden
+npm install
 npm run dev          # http://localhost:3000
 ```
 
@@ -61,31 +60,42 @@ Für einen Produktionslauf:
 npm run build && npm start
 ```
 
+Es gibt keine Datenbank, keine Umgebungsvariablen und keinen Einrichtungsschritt —
+die App läuft nach dem Klonen sofort.
+
 ## Technik
 
 - **Next.js 16 (App Router)** mit React 19, **Tailwind CSS 4** und **Framer Motion**,
   Icons von **lucide-react**.
-- **Prisma + SQLite** für Lektionen und Lernfortschritt (`prisma/schema.prisma`).
+- **Kein Backend.** Alle Seiten werden beim Build statisch erzeugt, der Lernfortschritt
+  lebt im Browser. Damit läuft die App auf jedem statischen Hosting.
 - **Web Speech API** für Sprachausgabe (`SpeechSynthesis`) und Ausspracheprüfung
   (`SpeechRecognition`), **MediaRecorder + AnalyserNode** für Aufnahme und Wellenform.
 
 ### Wo der Inhalt lebt
 
 Die Lektionen werden als typisierte TypeScript-Module in `src/content/lessons/` autoriert —
-das ist die Single Source of Truth, versionierbar und im Review lesbar. `prisma/seed.ts`
-schreibt sie in die Datenbank; das Schema in `src/content/types.ts` erzwingt dabei, dass
-keine Lektion ohne Racconto, Grammatik, Dialog, Shadowing-Zeilen, Vokabular und Quiz
-durchrutscht. Eine neue Lektion anlegen heißt: Modul schreiben, in `src/content/index.ts`
-eintragen, `npm run db:seed`.
+das ist die Single Source of Truth, versionierbar und im Review lesbar. Die Typen in
+`src/content/types.ts` erzwingen dabei, dass keine Lektion ohne Racconto, Grammatik,
+Dialog, Shadowing-Zeilen, Vokabular und Quiz durchrutscht. Eine neue Lektion anlegen
+heißt: Modul schreiben, in `src/content/index.ts` eintragen, fertig — der nächste Build
+zieht sie mit.
 
 ### Fortschritt und Persistenz
 
-Der Fortschritt (erledigte Schritte, Quiz-Bestwerte, Karteikartenzustände) wird sofort im
-`localStorage` gesichert und gebündelt an `POST /api/progress` geschickt, das ihn pro
-anonymer Learner-ID in SQLite ablegt. Ist die Datenbank nicht erreichbar, antwortet die
-Route mit 503 und die App läuft rein lokal weiter — das Statusfeld oben rechts zeigt an,
-was gerade gilt (`sincronizzato` / `solo locale`). Beim Start werden beide Stände
-zusammengeführt, wobei jeweils der weiter fortgeschrittene gewinnt.
+Der Fortschritt — erledigte Schritte, Quiz-Bestwerte, Karteikartenzustände — liegt
+ausschließlich im `localStorage` des jeweiligen Browsers. Es gibt bewusst kein Konto und
+keinen Server: Nichts verlässt das Gerät, und die App braucht keine Datenbank.
+
+Die Konsequenz steht in der App selbst: Das Feld oben rechts sagt «nur hier» und erklärt
+im Tooltip, dass der Stand nicht auf andere Geräte übergeht und beim Löschen der
+Websitedaten verschwindet. Lässt der Browser gar kein Speichern zu (privater Modus), zeigt
+das Feld «flüchtig» statt still zu scheitern. Auf dem Dashboard setzt «Zurücksetzen» alles
+wieder auf null.
+
+Wer den Fortschritt später geräteübergreifend braucht, findet in der Git-Historie
+(Commit `95821a8`) eine vollständige Prisma/SQLite-Anbindung samt `/api/progress` und
+Zusammenführung beider Stände — sie wurde für dieses Deployment bewusst entfernt.
 
 ### Browser-Unterstützung
 
@@ -98,7 +108,7 @@ verlangt HTTPS oder `localhost`.
 
 ```
 src/
-  app/                     Routen: Dashboard, /lezioni/[slug], /vocabolario, /api/*
+  app/                     Routen: Dashboard, /lezioni/[slug], /vocabolario
   components/
     dashboard/             Fortschrittsleiste, Phasenabschnitte, Lektionskarten
     lesson/                Racconto, Grammatica, Dialogo, Shadowing, Vokabeln, Quiz
@@ -107,9 +117,18 @@ src/
     lessons/               Die ausgearbeiteten Lektionen
     index.ts               Phasen, Roadmap, abgeleitete Projektionen
   lib/
-    progress.tsx           Fortschritts-Context mit LocalStorage- und API-Sync
+    progress.tsx           Fortschritts-Context auf LocalStorage
     speech.ts              Web-Speech-Hooks, Aufnahme, Ausspracheabgleich
     srs.ts                 Spaced Repetition
     glossary.ts            Vokabelerkennung im Fließtext
-prisma/                    Schema und Seed
 ```
+
+## Deployment
+
+Die App ist ein reines Frontend und braucht beim Deployen weder Konfiguration noch
+Umgebungsvariablen. Auf Vercel genügt der Import des Repositories; das Framework wird
+automatisch erkannt (Build `next build`). Genauso läuft sie auf Netlify, Cloudflare Pages
+oder jedem anderen Node-Hosting.
+
+Ein Hinweis zum Mikrofon: Aufnahme und Ausspracheprüfung verlangen HTTPS. Auf Vercel ist
+das gegeben, lokal funktioniert `localhost` ebenfalls.

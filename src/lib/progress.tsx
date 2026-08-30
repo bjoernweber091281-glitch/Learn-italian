@@ -13,8 +13,15 @@ import {
 import type { LessonStep } from "@/content/types";
 import { createCardState, review, type CardState, type CardStateMap, type Grade } from "@/lib/srs";
 
+/**
+ * Lernfortschritt — ausschließlich im Browser.
+ *
+ * Es gibt bewusst keinen Server: Der Zustand lebt im localStorage des jeweiligen
+ * Geräts. Das heißt, er überlebt Neuladen und Schließen des Tabs, wandert aber
+ * nicht auf andere Geräte oder Browser mit. Der Schlüssel ist versioniert, damit
+ * ein späteres Format-Update alte Stände nicht stillschweigend zerlegt.
+ */
 const STORAGE_KEY = "la-via-italiana:progress:v1";
-const LEARNER_KEY = "la-via-italiana:learner:v1";
 
 export interface LessonProgress {
   steps: LessonStep[];
@@ -29,12 +36,11 @@ export interface ProgressState {
   cards: CardStateMap;
 }
 
-/** `local` = nur im Browser, `synced` = zusätzlich in der Datenbank. */
-export type SyncState = "loading" | "synced" | "local";
+/** `checking` bis der gespeicherte Stand gelesen ist, danach das Ergebnis. */
+export type StorageState = "checking" | "persisted" | "unavailable";
 
 interface ProgressContextValue extends ProgressState {
-  learnerId: string;
-  syncState: SyncState;
+  storageState: StorageState;
   lessonProgress: (slug: string) => LessonProgress;
   markStep: (slug: string, step: LessonStep) => void;
   markVisited: (slug: string) => void;
@@ -67,115 +73,42 @@ function readLocal(): ProgressState {
   }
 }
 
-function readLearnerId(): string {
-  if (typeof window === "undefined") return "";
+/** Prüft, ob der Browser überhaupt schreiben lässt (privater Modus, Richtlinien). */
+function canPersist(): boolean {
   try {
-    const existing = window.localStorage.getItem(LEARNER_KEY);
-    if (existing) return existing;
-    const generated =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `learner-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    window.localStorage.setItem(LEARNER_KEY, generated);
-    return generated;
+    const probe = `${STORAGE_KEY}:probe`;
+    window.localStorage.setItem(probe, "1");
+    window.localStorage.removeItem(probe);
+    return true;
   } catch {
-    return "";
+    return false;
   }
-}
-
-/** Vereinigt lokalen und serverseitigen Stand — der weiter fortgeschrittene gewinnt. */
-function mergeStates(local: ProgressState, remote: ProgressState): ProgressState {
-  const lessons: Record<string, LessonProgress> = { ...local.lessons };
-  for (const [slug, remoteLesson] of Object.entries(remote.lessons)) {
-    const localLesson = lessons[slug];
-    if (!localLesson) {
-      lessons[slug] = remoteLesson;
-      continue;
-    }
-    lessons[slug] = {
-      steps: Array.from(new Set([...localLesson.steps, ...remoteLesson.steps])),
-      completed: localLesson.completed || remoteLesson.completed,
-      bestQuizScore: Math.max(localLesson.bestQuizScore, remoteLesson.bestQuizScore),
-      quizTotal: Math.max(localLesson.quizTotal, remoteLesson.quizTotal),
-      lastVisitedAt:
-        localLesson.lastVisitedAt > remoteLesson.lastVisitedAt
-          ? localLesson.lastVisitedAt
-          : remoteLesson.lastVisitedAt,
-    };
-  }
-
-  const cards: CardStateMap = { ...local.cards };
-  for (const [id, remoteCard] of Object.entries(remote.cards)) {
-    const localCard = cards[id];
-    // Mehr Wiederholungen bedeutet den aktuelleren Lernstand.
-    if (!localCard || remoteCard.repetitions > localCard.repetitions) cards[id] = remoteCard;
-  }
-
-  return { lessons, cards };
 }
 
 export function ProgressProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ProgressState>({ lessons: {}, cards: {} });
-  const [learnerId, setLearnerId] = useState("");
-  const [syncState, setSyncState] = useState<SyncState>("loading");
+  const [storageState, setStorageState] = useState<StorageState>("checking");
   const hydrated = useRef(false);
-  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 1. Lokalen Stand laden, danach den Server dazumischen.
+  // 1. Gespeicherten Stand einlesen. Erst danach darf geschrieben werden, sonst
+  //    überschreibt der leere Startzustand beim ersten Render die Historie.
   useEffect(() => {
-    const id = readLearnerId();
-    const local = readLocal();
-    setLearnerId(id);
-    setState(local);
+    setState(readLocal());
+    setStorageState(canPersist() ? "persisted" : "unavailable");
     hydrated.current = true;
-
-    if (!id) {
-      setSyncState("local");
-      return;
-    }
-
-    let cancelled = false;
-    fetch(`/api/progress?learnerId=${encodeURIComponent(id)}`)
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("offline"))))
-      .then((remote: ProgressState) => {
-        if (cancelled) return;
-        setState((current) => mergeStates(current, remote));
-        setSyncState("synced");
-      })
-      .catch(() => {
-        if (!cancelled) setSyncState("local");
-      });
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
-  // 2. Jede Änderung sofort lokal sichern, gebündelt an den Server schicken.
+  // 2. Jede Änderung sofort sichern.
   useEffect(() => {
     if (!hydrated.current) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
-      /* Privater Modus o. Ä. — der Lauf geht auch ohne Persistenz weiter. */
+      // Privater Modus, volles Kontingent oder blockierte Speicherung: Die Sitzung
+      // läuft normal weiter, nur eben ohne Gedächtnis über das Neuladen hinaus.
+      setStorageState("unavailable");
     }
-
-    if (!learnerId || syncState === "loading") return;
-    if (pushTimer.current) clearTimeout(pushTimer.current);
-    pushTimer.current = setTimeout(() => {
-      fetch("/api/progress", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ learnerId, ...state }),
-      })
-        .then((response) => setSyncState(response.ok ? "synced" : "local"))
-        .catch(() => setSyncState("local"));
-    }, 800);
-
-    return () => {
-      if (pushTimer.current) clearTimeout(pushTimer.current);
-    };
-  }, [state, learnerId, syncState]);
+  }, [state]);
 
   const lessonProgress = useCallback(
     (slug: string) => state.lessons[slug] ?? emptyLesson,
@@ -245,6 +178,11 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const resetProgress = useCallback(() => {
     setState({ lessons: {}, cards: {} });
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* Ohne Speicher gibt es auch nichts zu löschen. */
+    }
   }, []);
 
   const completedLessons = useMemo(
@@ -257,8 +195,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const value: ProgressContextValue = {
     ...state,
-    learnerId,
-    syncState,
+    storageState,
     lessonProgress,
     markStep,
     markVisited,

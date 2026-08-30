@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Cloud, CloudOff, Layers, Loader2, Sparkles } from "lucide-react";
+import { Layers, Loader2, MonitorSmartphone, Sparkles, TriangleAlert } from "lucide-react";
 import { useProgress } from "@/lib/progress";
 import { publishedLessons } from "@/content";
 
@@ -11,19 +11,43 @@ const navigation = [
   { href: "/vocabolario", label: "Vocabolario", hint: "Karteikarten" },
 ];
 
-function SyncBadge() {
-  const { syncState } = useProgress();
+/**
+ * Macht sichtbar, wo der Fortschritt liegt: im Speicher dieses Browsers — und
+ * warnt, wenn der Browser gar nicht speichern lässt (privater Modus).
+ */
+function StorageBadge() {
+  const { storageState } = useProgress();
 
   const config = {
-    loading: { Icon: Loader2, text: "lädt", title: "Fortschritt wird geladen", spin: true },
-    synced: { Icon: Cloud, text: "sincronizzato", title: "Fortschritt in der Datenbank gesichert", spin: false },
-    local: { Icon: CloudOff, text: "solo locale", title: "Kein Server erreichbar — Fortschritt liegt nur in diesem Browser", spin: false },
-  }[syncState];
+    checking: {
+      Icon: Loader2,
+      text: "lädt",
+      title: "Gespeicherter Fortschritt wird gelesen",
+      spin: true,
+      className: "border-marmo-300 bg-marmo-50/80 text-inchiostro-400",
+    },
+    persisted: {
+      Icon: MonitorSmartphone,
+      text: "nur hier",
+      title:
+        "Dein Fortschritt wird ausschließlich in diesem Browser gespeichert. Er geht nicht auf andere Geräte über und verschwindet, wenn du die Websitedaten löschst.",
+      spin: false,
+      className: "border-marmo-300 bg-marmo-50/80 text-inchiostro-400",
+    },
+    unavailable: {
+      Icon: TriangleAlert,
+      text: "flüchtig",
+      title:
+        "Dieser Browser lässt kein Speichern zu (etwa im privaten Modus). Der Fortschritt gilt nur für diese Sitzung.",
+      spin: false,
+      className: "border-terracotta-200 bg-terracotta-50 text-terracotta-700",
+    },
+  }[storageState];
 
   return (
     <span
       title={config.title}
-      className="hidden items-center gap-1.5 rounded-full border border-marmo-300 bg-marmo-50/80 px-2.5 py-1 text-[11px] font-medium text-inchiostro-400 sm:inline-flex"
+      className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium sm:inline-flex ${config.className}`}
     >
       <config.Icon className={`h-3 w-3 ${config.spin ? "animate-spin" : ""}`} aria-hidden />
       {config.text}
@@ -75,7 +99,7 @@ export function SiteHeader() {
         </nav>
 
         <div className="hidden shrink-0 items-center gap-2 border-l border-marmo-300 pl-3 sm:flex">
-          <SyncBadge />
+          <StorageBadge />
           <span
             className="inline-flex items-center gap-1.5 rounded-full bg-oliva-100 px-2.5 py-1 text-[11px] font-semibold text-oliva-700"
             title={`${completedLessons.length} von ${publishedLessons} verfügbaren Lektionen abgeschlossen`}
