@@ -1,0 +1,98 @@
+// La Via Italiana — Datenmodell
+// Inhalte (Lektionen) werden aus src/content geseedet, Lernfortschritt wird
+// pro Learner persistiert. SQLite hält die App komplett lokal lauffähig.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Eine Lektion inklusive komplettem Inhalt (Racconto, Grammatica, Dialogo, Quiz)
+/// als JSON-Payload, damit das Schema stabil bleibt, während Inhalte wachsen.
+model Lesson {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  number    Int
+  phase     String
+  title     String
+  subtitle  String
+  location  String
+  unesco    String?
+  summary   String
+  published Boolean  @default(true)
+  payload   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  progress LessonProgress[]
+
+  @@index([phase, number])
+}
+
+/// Anonymer Lernender. Die ID wird clientseitig erzeugt und im Browser gehalten.
+model Learner {
+  id        String   @id
+  handle    String   @default("Ospite")
+  streak    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lessonProgress LessonProgress[]
+  quizAttempts   QuizAttempt[]
+  flashcards     FlashcardState[]
+}
+
+/// Fortschritt pro Lektion: welche der drei Schritte sind erledigt.
+model LessonProgress {
+  id             String   @id @default(cuid())
+  learnerId      String
+  lessonSlug     String
+  stepsCompleted String   @default("[]")
+  completed      Boolean  @default(false)
+  bestQuizScore  Int      @default(0)
+  quizTotal      Int      @default(0)
+  lastVisitedAt  DateTime @default(now())
+
+  learner Learner @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  lesson  Lesson  @relation(fields: [lessonSlug], references: [slug], onDelete: Cascade)
+
+  @@unique([learnerId, lessonSlug])
+  @@index([learnerId])
+}
+
+/// Einzelner Quizversuch — erlaubt eine Lernkurve über die Zeit.
+model QuizAttempt {
+  id         String   @id @default(cuid())
+  learnerId  String
+  lessonSlug String
+  score      Int
+  total      Int
+  createdAt  DateTime @default(now())
+
+  learner Learner @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+
+  @@index([learnerId, lessonSlug])
+}
+
+/// Spaced-Repetition-Zustand einer Vokabelkarte (SM-2 light).
+model FlashcardState {
+  id          String   @id @default(cuid())
+  learnerId   String
+  cardId      String
+  ease        Float    @default(2.5)
+  intervalDay Int      @default(0)
+  repetitions Int      @default(0)
+  lapses      Int      @default(0)
+  dueAt       DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  learner Learner @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+
+  @@unique([learnerId, cardId])
+  @@index([learnerId, dueAt])
+}
